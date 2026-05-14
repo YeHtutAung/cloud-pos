@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"C:\\\\Rex\\\\14-Claude-workspace\\\\nightlife-pos\" -Recurse -Name)",
+      "Bash(python *)",
+      "Bash(C:\\\\Program Files\\\\Git\\\\mingw64\\\\bin\\\\pdftotext.exe *)",
+      "Bash(npm install *)",
+      "Bash(git add *)"
+    ]
+  }
+}

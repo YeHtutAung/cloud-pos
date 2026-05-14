@@ -1,0 +1,358 @@
+// nightlife-pos/backend/prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════
+//  LOOKUP / CONFIG TABLES  (Open for extension)
+// ═══════════════════════════════════════════════════════
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique  // owner | supervisor | staff | bartender...
+  permissions Json                // { "can_void": true, "can_close_shift": false }
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+
+  @@map("roles")
+}
+
+model Status {
+  id         String   @id @default(uuid())
+  entity     String                // table | order | shift | payment
+  code       String                // available | occupied | paid | void...
+  label      String                // human readable
+  color      String                // UI hex color hint
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([entity, code])
+  @@map("statuses")
+}
+
+model VenueType {
+  id        String   @id @default(uuid())
+  name      String   @unique  // bar | club | lounge | festival | hotel...
+  icon      String?            // emoji or icon name
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  venues    Venue[]
+
+  @@map("venue_types")
+}
+
+model ReportType {
+  id        String   @id @default(uuid())
+  code      String   @unique  // shift | nightly | weekly | monthly | custom
+  label     String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  reports   Report[]
+
+  @@map("report_types")
+}
+
+// ═══════════════════════════════════════════════════════
+//  CORE TABLES
+// ═══════════════════════════════════════════════════════
+
+model Venue {
+  id             String   @id @default(uuid())
+  name           String
+  typeId         String
+  operatingHours Json                // { "open": "18:00", "close": "03:00" }
+  ownerId        String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  type                       VenueType                    @relation(fields: [typeId], references: [id])
+  owner                      User                         @relation("VenueOwner", fields: [ownerId], references: [id])
+  zones                      Zone[]
+  users                      User[]
+  menuCategories             MenuCategory[]
+  menuItems                  MenuItem[]
+  shifts                     Shift[]
+  orders                     Order[]
+  notificationChannels       VenueNotificationChannel[]
+  paymentGateways            PaymentGateway[]
+  reports                    Report[]
+
+  @@map("venues")
+}
+
+model VenueNotificationChannel {
+  id        String   @id @default(uuid())
+  venueId   String
+  channel   String              // telegram | whatsapp | line | messenger
+  isActive  Boolean  @default(true)
+  config    Json                // channel-specific: { "chat_id": "..." }
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  venue     Venue    @relation(fields: [venueId], references: [id])
+
+  @@map("venue_notification_channels")
+}
+
+model PaymentGateway {
+  id        String   @id @default(uuid())
+  venueId   String
+  name      String              // MMQR | KBZPay | Stripe | Visa | Cash
+  type      String              // qr | card | wallet | bank_transfer | cash
+  isActive  Boolean  @default(true)
+  config    Json                // gateway credentials (encrypted)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  venue     Venue     @relation(fields: [venueId], references: [id])
+  payments  Payment[]
+
+  @@map("payment_gateways")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  pinHash   String
+  roleId    String
+  zoneId    String?             // assigned zone (staff only)
+  venueId   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  role          Role     @relation(fields: [roleId], references: [id])
+  zone          Zone?    @relation(fields: [zoneId], references: [id])
+  venue         Venue    @relation(fields: [venueId], references: [id])
+  ownedVenues   Venue[]  @relation("VenueOwner")
+  orders        Order[]
+  openedShifts  Shift[]  @relation("ShiftOpener")
+  closedShifts  Shift[]  @relation("ShiftCloser")
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model Zone {
+  id        String   @id @default(uuid())
+  name      String              // Bar | VIP | Rooftop | Stage
+  venueId   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  venue     Venue    @relation(fields: [venueId], references: [id])
+  tables    Table[]
+  users     User[]
+  orders    Order[]
+
+  @@map("zones")
+}
+
+model Table {
+  id         String   @id @default(uuid())
+  label      String              // Table 1 | VIP-2 | Bar-3
+  zoneId     String
+  statusCode String   @default("available") // references statuses.code
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  zone      Zone     @relation(fields: [zoneId], references: [id])
+  orders    Order[]
+
+  @@map("tables")
+}
+
+model MenuCategory {
+  id        String   @id @default(uuid())
+  name      String              // Beer | Spirits | Cocktails | Mocktails
+  venueId   String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  venue     Venue      @relation(fields: [venueId], references: [id])
+  items     MenuItem[]
+
+  @@map("menu_categories")
+}
+
+model MenuItem {
+  id          String   @id @default(uuid())
+  name        String
+  categoryId  String
+  venueId     String
+  isFastSell  Boolean  @default(false)   // shows on main grid
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  imageUrl    String?
+  metadata    Json?                       // { "alcohol_content": "5%", "volume": "330ml" }
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  category    MenuCategory    @relation(fields: [categoryId], references: [id])
+  venue       Venue           @relation(fields: [venueId], references: [id])
+  prices      MenuItemPrice[]
+  orderItems  OrderItem[]
+
+  @@map("menu_items")
+}
+
+model MenuItemPrice {
+  id           String    @id @default(uuid())
+  menuItemId   String
+  price        Decimal   @db.Decimal(10, 2)
+  priceType    String    @default("standard")   // standard | happy_hour | vip | promo
+  validFrom    DateTime?
+  validUntil   DateTime?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  menuItem     MenuItem  @relation(fields: [menuItemId], references: [id])
+
+  @@map("menu_item_prices")
+}
+
+model Shift {
+  id          String    @id @default(uuid())
+  label       String                        // Happy Hour | Main Night | Late Night
+  venueId     String
+  openedById  String
+  closedById  String?
+  statusCode  String    @default("open")   // references statuses.code
+  floatAmount Decimal?  @db.Decimal(10, 2)
+  startedAt   DateTime  @default(now())
+  endedAt     DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  venue       Venue     @relation(fields: [venueId], references: [id])
+  openedBy    User      @relation("ShiftOpener", fields: [openedById], references: [id])
+  closedBy    User?     @relation("ShiftCloser", fields: [closedById], references: [id])
+  orders      Order[]
+  reports     Report[]
+
+  @@map("shifts")
+}
+
+model Order {
+  id          String   @id @default(uuid())
+  orderNumber String   @unique              // ORD-0001
+  tableId     String
+  zoneId      String
+  shiftId     String
+  staffId     String
+  venueId     String
+  statusCode  String   @default("pending") // references statuses.code
+  totalAmount Decimal  @db.Decimal(10, 2)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  table       Table       @relation(fields: [tableId], references: [id])
+  zone        Zone        @relation(fields: [zoneId], references: [id])
+  shift       Shift       @relation(fields: [shiftId], references: [id])
+  staff       User        @relation(fields: [staffId], references: [id])
+  venue       Venue       @relation(fields: [venueId], references: [id])
+  items       OrderItem[]
+  payments    Payment[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String   @id @default(uuid())
+  orderId     String
+  menuItemId  String
+  name        String              // price snapshot at time of order
+  price       Decimal  @db.Decimal(10, 2)
+  quantity    Int
+  subtotal    Decimal  @db.Decimal(10, 2)
+  createdAt   DateTime @default(now())
+
+  order       Order    @relation(fields: [orderId], references: [id])
+  menuItem    MenuItem @relation(fields: [menuItemId], references: [id])
+
+  @@map("order_items")
+}
+
+model Payment {
+  id           String    @id @default(uuid())
+  orderId      String
+  gatewayId    String                        // FK -> payment_gateways
+  statusCode   String    @default("pending") // references statuses.code
+  amount       Decimal   @db.Decimal(10, 2)
+  gatewayRef   String?                       // reference from gateway
+  qrCode       String?                       // QR data if applicable
+  qrExpiresAt  DateTime?
+  metadata     Json?                         // full gateway response
+  paidAt       DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  order        Order          @relation(fields: [orderId], references: [id])
+  gateway      PaymentGateway @relation(fields: [gatewayId], references: [id])
+
+  @@map("payments")
+}
+
+// ═══════════════════════════════════════════════════════
+//  REPORTING & AUDIT
+// ═══════════════════════════════════════════════════════
+
+model Report {
+  id            String   @id @default(uuid())
+  venueId       String
+  reportTypeId  String
+  shiftId       String?
+  totalRevenue  Decimal  @db.Decimal(10, 2)
+  totalOrders   Int
+  paidOrders    Int
+  voidOrders    Int
+  expiredQr     Int
+  cashOrders    Int
+  breakdown     Json     // { zone: {...}, staff: {...}, category: {...} }
+  pdfUrl        String?
+  sentChannels  Json     @default("{}")   // { "telegram": true, "whatsapp": false }
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  venue         Venue      @relation(fields: [venueId], references: [id])
+  reportType    ReportType @relation(fields: [reportTypeId], references: [id])
+  shift         Shift?     @relation(fields: [shiftId], references: [id])
+
+  @@map("reports")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  venueId   String
+  actorId   String
+  action    String              // order.void | shift.close | menu.import
+  entity    String              // order | shift | menu_item | payment
+  entityId  String
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  actor     User     @relation(fields: [actorId], references: [id])
+
+  @@map("audit_logs")
+}
