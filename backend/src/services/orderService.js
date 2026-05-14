@@ -6,6 +6,12 @@ const mmqr                = require('../utils/mmqr')
 
 // ── Helpers ──────────────────────────────────────────────────
 
+async function resolveStatus(entity, code) {
+  const s = await prisma.status.findFirst({ where: { entity, code, isActive: true } })
+  if (!s) throw Object.assign(new Error(`Status '${code}' not configured for ${entity}`), { status: 500 })
+  return s.code
+}
+
 async function nextOrderNumber(venueId) {
   const last = await prisma.order.findFirst({
     where:   { venueId },
@@ -90,6 +96,10 @@ async function createOrder({ tableId, shiftId, staffId, venueId, items, notes })
 
   const { rows, total } = await resolveItems(items, venueId)
   const orderNumber     = await nextOrderNumber(venueId)
+  const [orderPending, tableOccupied] = await Promise.all([
+    resolveStatus('order', 'pending'),
+    resolveStatus('table', 'occupied')
+  ])
 
   const order = await prisma.order.create({
     data: {
@@ -99,7 +109,7 @@ async function createOrder({ tableId, shiftId, staffId, venueId, items, notes })
       shiftId,
       staffId,
       venueId,
-      statusCode:  'pending',
+      statusCode:  orderPending,
       totalAmount: total,
       notes:       notes || null,
       items:       { create: rows }
@@ -111,11 +121,11 @@ async function createOrder({ tableId, shiftId, staffId, venueId, items, notes })
     }
   })
 
-  await prisma.table.update({ where: { id: tableId }, data: { statusCode: 'occupied' } })
+  await prisma.table.update({ where: { id: tableId }, data: { statusCode: tableOccupied } })
 
   const io = getIo()
   io.to(`venue:${venueId}`).emit('order:created',  order)
-  io.to(`venue:${venueId}`).emit('table:updated',  { id: tableId, statusCode: 'occupied' })
+  io.to(`venue:${venueId}`).emit('table:updated',  { id: tableId, statusCode: tableOccupied })
 
   logger.info(`Order created: ${order.orderNumber} table:${table.label} venue:${venueId}`)
   return order
@@ -179,15 +189,17 @@ async function voidOrder(orderId, venueId, actorId, reason) {
     throw Object.assign(new Error('Cannot void a paid order'), { status: 409 })
   }
 
-  await prisma.order.update({ where: { id: orderId }, data: { statusCode: 'void' } })
+  const voidCode = await resolveStatus('order', 'void')
+  await prisma.order.update({ where: { id: orderId }, data: { statusCode: voidCode } })
 
   // Free the table if no other non-void orders remain on it
   const otherActive = await prisma.order.count({
     where: { tableId: order.tableId, statusCode: { notIn: ['void'] }, id: { not: orderId } }
   })
   if (otherActive === 0) {
-    await prisma.table.update({ where: { id: order.tableId }, data: { statusCode: 'available' } })
-    getIo().to(`venue:${venueId}`).emit('table:updated', { id: order.tableId, statusCode: 'available' })
+    const tableAvail = await resolveStatus('table', 'available')
+    await prisma.table.update({ where: { id: order.tableId }, data: { statusCode: tableAvail } })
+    getIo().to(`venue:${venueId}`).emit('table:updated', { id: order.tableId, statusCode: tableAvail })
   }
 
   await prisma.auditLog.create({

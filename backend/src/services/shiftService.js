@@ -3,6 +3,12 @@ const logger         = require('../utils/logger')
 const { getIo }      = require('../sockets')
 const reportService  = require('./reportService')
 
+async function resolveStatus(entity, code) {
+  const s = await prisma.status.findFirst({ where: { entity, code, isActive: true } })
+  if (!s) throw Object.assign(new Error(`Status '${code}' not configured for ${entity}`), { status: 500 })
+  return s.code
+}
+
 async function listShifts(venueId, { statusCode } = {}) {
   const where = { venueId }
   if (statusCode) where.statusCode = statusCode
@@ -63,13 +69,14 @@ async function openShift({ label, venueId, openedById, floatAmount }) {
     )
   }
 
+  const openCode = await resolveStatus('shift', 'open')
   const shift = await prisma.shift.create({
     data: {
       label,
       venueId,
       openedById,
       floatAmount: floatAmount != null ? parseFloat(floatAmount) : null,
-      statusCode:  'open'
+      statusCode:  openCode
     },
     include: { openedBy: { select: { id: true, name: true } } }
   })
@@ -100,10 +107,11 @@ async function closeShift(id, venueId, closedById) {
     )
   }
 
-  const now     = new Date()
-  const updated = await prisma.shift.update({
+  const closedCode = await resolveStatus('shift', 'closed')
+  const now        = new Date()
+  const updated    = await prisma.shift.update({
     where: { id },
-    data:  { statusCode: 'closed', closedById, endedAt: now },
+    data:  { statusCode: closedCode, closedById, endedAt: now },
     include: {
       openedBy: { select: { id: true, name: true } },
       closedBy: { select: { id: true, name: true } }

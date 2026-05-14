@@ -3,6 +3,12 @@ const logger    = require('../utils/logger')
 const { getIo } = require('../sockets')
 const mmqr      = require('../utils/mmqr')
 
+async function resolveStatus(entity, code) {
+  const s = await prisma.status.findFirst({ where: { entity, code, isActive: true } })
+  if (!s) throw Object.assign(new Error(`Status '${code}' not configured for ${entity}`), { status: 500 })
+  return s.code
+}
+
 // ── Callback handler (GET query params from APlus) ───────────
 
 /**
@@ -53,63 +59,86 @@ async function handleCallback({
 
   if (isSuccess) {
     const paidAt = transactionDateTime ? new Date(transactionDateTime) : new Date()
+    const [paidPayment, paidOrder, tableAvail] = await Promise.all([
+      resolveStatus('payment', 'paid'),
+      resolveStatus('order',   'paid'),
+      resolveStatus('table',   'available')
+    ])
+    const actor = await prisma.user.findFirst({
+      where:  { venueId, isActive: true, role: { name: 'owner' } },
+      select: { id: true }
+    })
+    if (!actor) logger.warn(`payment.confirmed audit: no owner found for venue ${venueId}`)
 
     await prisma.$transaction(async (tx) => {
       await tx.payment.update({
         where: { id: payment.id },
         data: {
-          statusCode: 'paid',
+          statusCode: paidPayment,
           gatewayRef: transactionId,
           paidAt,
           metadata: { transactionId, billNo, endToEndId, transactionDateTime, institutionName, amount }
         }
       })
 
-      await tx.order.update({ where: { id: order.id }, data: { statusCode: 'paid' } })
+      await tx.order.update({ where: { id: order.id }, data: { statusCode: paidOrder } })
 
       const otherActive = await tx.order.count({
         where: { tableId, statusCode: { notIn: ['void', 'paid'] }, id: { not: order.id } }
       })
       if (otherActive === 0) {
-        await tx.table.update({ where: { id: tableId }, data: { statusCode: 'available' } })
+        await tx.table.update({ where: { id: tableId }, data: { statusCode: tableAvail } })
       }
 
-      const actor = await tx.user.findFirst({
-        where:  { venueId, isActive: true, role: { name: 'owner' } },
-        select: { id: true }
+      await tx.auditLog.create({
+        data: {
+          venueId,
+          actorId:  actor?.id ?? null,
+          action:   'payment.confirmed',
+          entity:   'payment',
+          entityId: payment.id,
+          before:   { statusCode: 'pending' },
+          after:    { statusCode: paidPayment, transactionId }
+        }
       })
-      if (actor) {
-        await tx.auditLog.create({
-          data: {
-            venueId,
-            actorId:  actor.id,
-            action:   'payment.confirmed',
-            entity:   'payment',
-            entityId: payment.id,
-            before:   { statusCode: 'pending' },
-            after:    { statusCode: 'paid', transactionId }
-          }
-        })
-      }
     })
 
     const table = await prisma.table.findUnique({ where: { id: tableId }, select: { statusCode: true } })
     const io    = getIo()
     io.to(`venue:${venueId}`).emit('payment:confirmed', { orderId: order.id, paymentId: payment.id, transactionId })
     io.to(`venue:${venueId}`).emit('order:paid',        { orderId: order.id, orderNumber })
-    if (table.statusCode === 'available') {
-      io.to(`venue:${venueId}`).emit('table:updated', { id: tableId, statusCode: 'available' })
+    if (table.statusCode === tableAvail) {
+      io.to(`venue:${venueId}`).emit('table:updated', { id: tableId, statusCode: tableAvail })
     }
 
     logger.info(`Payment confirmed: ${payment.id} order:${orderNumber} txn:${transactionId} venue:${venueId}`)
 
   } else {
+    const failedCode = await resolveStatus('payment', 'failed')
+    const actor      = await prisma.user.findFirst({
+      where:  { venueId, isActive: true, role: { name: 'owner' } },
+      select: { id: true }
+    })
+    if (!actor) logger.warn(`payment.failed audit: no owner found for venue ${venueId}`)
+
     await prisma.payment.update({
       where: { id: payment.id },
       data: {
-        statusCode: 'failed',
+        statusCode: failedCode,
         gatewayRef: transactionId ?? null,
         metadata:   { transactionId, errorCode, errorDesc, transactionDateTime, institutionName }
+      }
+    })
+
+    await prisma.auditLog.create({
+      data: {
+        venueId,
+        actorId:  actor?.id ?? null,
+        action:   'payment.failed',
+        entity:   'payment',
+        entityId: payment.id,
+        before:   { statusCode: payment.statusCode },
+        after:    { statusCode: failedCode, errorCode, errorDesc }
       }
     })
 
@@ -152,9 +181,10 @@ async function refreshQr(paymentId, venueId) {
     currency:    'MMK'
   })
 
-  const updated = await prisma.payment.update({
+  const pendingCode = await resolveStatus('payment', 'pending')
+  const updated     = await prisma.payment.update({
     where: { id: paymentId },
-    data:  { qrCode, qrExpiresAt, statusCode: 'pending' }
+    data:  { qrCode, qrExpiresAt, statusCode: pendingCode }
   })
 
   getIo().to(`venue:${venueId}`).emit('payment:pending', {
