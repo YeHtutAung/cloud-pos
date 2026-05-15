@@ -88,4 +88,20 @@ router.post('/:id/pay',
   ctrl.initiatePayment
 )
 
+// PATCH /api/orders/:id/confirm — send order to kitchen
+router.patch('/:id/confirm',
+  authenticate,
+  [param('id').isUUID()],
+  validate,
+  ctrl.confirmOrder
+)
+
+// PATCH /api/orders/:id/ready — kitchen marks order ready
+router.patch('/:id/ready',
+  authenticate,
+  [param('id').isUUID()],
+  validate,
+  ctrl.markReady
+)
+
 module.exports = router

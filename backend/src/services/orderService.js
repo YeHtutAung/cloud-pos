@@ -270,4 +270,74 @@ async function initiatePayment(orderId, venueId, gatewayId) {
   return payment
 }
 
-module.exports = { listOrders, getOrder, createOrder, addItems, removeItem, voidOrder, initiatePayment }
+async function confirmOrder(orderId, venueId, actorId) {
+  const order = await prisma.order.findFirst({ where: { id: orderId, venueId } })
+  if (!order) throw Object.assign(new Error('Order not found'), { status: 404 })
+  if (order.statusCode !== 'pending') {
+    throw Object.assign(new Error(`Cannot confirm a ${order.statusCode} order`), { status: 409 })
+  }
+
+  const confirmedCode = await resolveStatus('order', 'confirmed')
+  const updated = await prisma.order.update({
+    where:   { id: orderId },
+    data:    { statusCode: confirmedCode },
+    include: {
+      items: true,
+      staff: { select: { id: true, name: true } },
+      table: { select: { id: true, label: true } }
+    }
+  })
+
+  await prisma.auditLog.create({
+    data: {
+      venueId,
+      actorId,
+      action:   'order.confirm',
+      entity:   'order',
+      entityId: orderId,
+      before:   { statusCode: 'pending' },
+      after:    { statusCode: confirmedCode }
+    }
+  })
+
+  getIo().to(`venue:${venueId}`).emit('order:confirmed', updated)
+  logger.info(`Order confirmed: ${order.orderNumber} by:${actorId} venue:${venueId}`)
+  return updated
+}
+
+async function markReady(orderId, venueId, actorId) {
+  const order = await prisma.order.findFirst({ where: { id: orderId, venueId } })
+  if (!order) throw Object.assign(new Error('Order not found'), { status: 404 })
+  if (order.statusCode !== 'confirmed') {
+    throw Object.assign(new Error(`Cannot mark ready a ${order.statusCode} order`), { status: 409 })
+  }
+
+  const readyCode = await resolveStatus('order', 'ready')
+  const updated = await prisma.order.update({
+    where:   { id: orderId },
+    data:    { statusCode: readyCode },
+    include: {
+      items: true,
+      staff: { select: { id: true, name: true } },
+      table: { select: { id: true, label: true } }
+    }
+  })
+
+  await prisma.auditLog.create({
+    data: {
+      venueId,
+      actorId,
+      action:   'order.ready',
+      entity:   'order',
+      entityId: orderId,
+      before:   { statusCode: 'confirmed' },
+      after:    { statusCode: readyCode }
+    }
+  })
+
+  getIo().to(`venue:${venueId}`).emit('order:ready', updated)
+  logger.info(`Order ready: ${order.orderNumber} by:${actorId} venue:${venueId}`)
+  return updated
+}
+
+module.exports = { listOrders, getOrder, createOrder, addItems, removeItem, voidOrder, initiatePayment, confirmOrder, markReady }

@@ -139,7 +139,7 @@ function PaymentModal({ payment, onClose }) {
 }
 
 function CartSidebar({ cart, cartTotal, activeOrder, gateways, placing,
-                       onIncrement, onDecrement, onClear, onPlace, onAddToOrder, onPay }) {
+                       onIncrement, onDecrement, onClear, onPlace, onAddToOrder, onPay, onSendToKitchen }) {
   const placed      = activeOrder != null
   const orderTotal  = placed ? parseFloat(activeOrder.totalAmount) : 0
   const isPaid      = activeOrder?.statusCode === 'paid'
@@ -221,6 +221,27 @@ function CartSidebar({ cart, cartTotal, activeOrder, gateways, placing,
             </div>
             {isPaid ? (
               <div className="py-2.5 text-center text-emerald-400 font-semibold text-sm">Payment received ✓</div>
+            ) : activeOrder.statusCode === 'pending' ? (
+              <button
+                onClick={onSendToKitchen}
+                disabled={placing}
+                className="w-full py-3 rounded-xl bg-orange-600 text-white font-semibold text-sm
+                           disabled:opacity-50 hover:bg-orange-500 active:bg-orange-700 transition-colors"
+              >
+                {placing ? '…' : '🍳 Send to Kitchen'}
+              </button>
+            ) : activeOrder.statusCode === 'ready' ? (
+              <>
+                <div className="py-2 text-center text-amber-400 font-semibold text-sm">🔔 Order Ready!</div>
+                <button
+                  onClick={onPay}
+                  disabled={placing || gateways.length === 0}
+                  className="w-full py-3 rounded-xl bg-emerald-600 text-white font-semibold text-sm
+                             disabled:opacity-50 hover:bg-emerald-500 active:bg-emerald-700 transition-colors"
+                >
+                  {placing ? '…' : gateways.length === 0 ? 'No gateway configured' : 'Pay with MMQR'}
+                </button>
+              </>
             ) : (
               <button
                 onClick={onPay}
@@ -228,9 +249,7 @@ function CartSidebar({ cart, cartTotal, activeOrder, gateways, placing,
                 className="w-full py-3 rounded-xl bg-emerald-600 text-white font-semibold text-sm
                            disabled:opacity-50 hover:bg-emerald-500 active:bg-emerald-700 transition-colors"
               >
-                {placing          ? '…'
-                 : gateways.length === 0 ? 'No gateway configured'
-                 : 'Pay with MMQR'}
+                {placing ? '…' : gateways.length === 0 ? 'No gateway configured' : 'Pay with MMQR'}
               </button>
             )}
           </>
@@ -306,13 +325,21 @@ export default function OrderEntry() {
       }
     }
 
-    socket.on('table:updated', onTableUpdated)
-    socket.on('order:updated', onOrderUpdated)
-    socket.on('order:paid',    onOrderPaid)
+    function onOrderStatusChange(order) {
+      if (order.id === activeOrder?.id) setActiveOrder(order)
+    }
+
+    socket.on('table:updated',   onTableUpdated)
+    socket.on('order:updated',   onOrderUpdated)
+    socket.on('order:paid',      onOrderPaid)
+    socket.on('order:confirmed', onOrderStatusChange)
+    socket.on('order:ready',     onOrderStatusChange)
     return () => {
-      socket.off('table:updated', onTableUpdated)
-      socket.off('order:updated', onOrderUpdated)
-      socket.off('order:paid',    onOrderPaid)
+      socket.off('table:updated',   onTableUpdated)
+      socket.off('order:updated',   onOrderUpdated)
+      socket.off('order:paid',      onOrderPaid)
+      socket.off('order:confirmed', onOrderStatusChange)
+      socket.off('order:ready',     onOrderStatusChange)
     }
   }, [user.venueId, activeOrder?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -439,6 +466,19 @@ export default function OrderEntry() {
     }
   }
 
+  async function sendToKitchen() {
+    if (!activeOrder || placing) return
+    setPlacing(true); setError('')
+    try {
+      const res = await api.patch(`/orders/${activeOrder.id}/confirm`)
+      setActiveOrder(res.data)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setPlacing(false)
+    }
+  }
+
   // ── Guards ────────────────────────────────────────────────
 
   if (loading) {
@@ -542,6 +582,7 @@ export default function OrderEntry() {
             onPlace={placeOrder}
             onAddToOrder={addItemsToOrder}
             onPay={initiatePayment}
+            onSendToKitchen={sendToKitchen}
           />
         </div>
       </div>

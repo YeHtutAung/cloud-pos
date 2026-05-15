@@ -1,7 +1,9 @@
-const cron      = require('node-cron')
-const prisma    = require('../config/prisma')
-const logger    = require('./logger')
-const { getIo } = require('../sockets')
+const cron           = require('node-cron')
+const prisma         = require('../config/prisma')
+const logger         = require('./logger')
+const { getIo }      = require('../sockets')
+const mmqr           = require('./mmqr')
+const paymentService = require('../services/paymentService')
 
 function initCronJobs() {
   // Expire pending QR payments every minute
@@ -37,6 +39,59 @@ function initCronJobs() {
       logger.error('QR expiry cron failed', { error: err.message })
     }
   })
+
+  // UAT polling — disabled in production when real callback is registered
+  const pollMs = parseInt(process.env.MMQR_POLL_INTERVAL_MS || '0', 10)
+  if (pollMs > 0) {
+    setInterval(async () => {
+      try {
+        const pending = await prisma.payment.findMany({
+          where:   { statusCode: 'pending', qrExpiresAt: { gt: new Date() } },
+          include: { order: { select: { orderNumber: true } } }
+        })
+        if (pending.length === 0) return
+
+        await Promise.allSettled(pending.map(async (payment) => {
+          const orderNumber = payment.order.orderNumber
+          const result      = await mmqr.enquireOrder(orderNumber)
+          if (!result?.data) return
+
+          const { paymentTxnStatus, posTransactionId, billNo, endToEndId,
+                  transactionDateTime, institutionName, amount } = result.data
+
+          if (paymentTxnStatus === 200) {
+            logger.info(`Poll: payment confirmed for ${orderNumber}`)
+            await paymentService.handleCallback({
+              orderId:             orderNumber,
+              amount,
+              status:              '200',
+              transactionId:       posTransactionId,
+              billNo,
+              endToEndId,
+              transactionDateTime,
+              institutionName
+            })
+          } else if (paymentTxnStatus === 500) {
+            logger.info(`Poll: payment failed for ${orderNumber}`)
+            await paymentService.handleCallback({
+              orderId: orderNumber,
+              amount,
+              status:  '500',
+              transactionId: posTransactionId,
+              endToEndId,
+              transactionDateTime,
+              institutionName
+            })
+          }
+          // 100 = still pending, 403 = not found yet — do nothing
+        }))
+      } catch (err) {
+        logger.error('MMQR poll cron failed', { error: err.message })
+      }
+    }, pollMs)
+
+    logger.info(`MMQR payment polling enabled every ${pollMs}ms`)
+  }
 
   logger.info('Cron jobs initialized')
 }

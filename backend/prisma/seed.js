@@ -26,6 +26,13 @@ async function main() {
           can_void: false, can_close_shift: false, can_manage_menu: false,
           can_view_reports: false, can_manage_staff: false
         }
+      },
+      {
+        name: 'kitchen',
+        permissions: {
+          can_void: false, can_close_shift: false, can_manage_menu: false,
+          can_view_reports: false, can_manage_staff: false
+        }
       }
     ],
     skipDuplicates: true
@@ -40,8 +47,9 @@ async function main() {
 
       { entity: 'order', code: 'pending',   label: 'Pending',   color: '#94a3b8', sortOrder: 1 },
       { entity: 'order', code: 'confirmed', label: 'Confirmed', color: '#3b82f6', sortOrder: 2 },
-      { entity: 'order', code: 'paid',      label: 'Paid',      color: '#22c55e', sortOrder: 3 },
-      { entity: 'order', code: 'void',      label: 'Void',      color: '#ef4444', sortOrder: 4 },
+      { entity: 'order', code: 'ready',     label: 'Ready',     color: '#f59e0b', sortOrder: 3 },
+      { entity: 'order', code: 'paid',      label: 'Paid',      color: '#22c55e', sortOrder: 4 },
+      { entity: 'order', code: 'void',      label: 'Void',      color: '#ef4444', sortOrder: 5 },
 
       { entity: 'shift', code: 'open',   label: 'Open',   color: '#22c55e', sortOrder: 1 },
       { entity: 'shift', code: 'closed', label: 'Closed', color: '#94a3b8', sortOrder: 2 },

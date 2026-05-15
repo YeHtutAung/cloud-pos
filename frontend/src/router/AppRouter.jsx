@@ -13,6 +13,10 @@ import SupervisorLayout from '../apps/supervisor/SupervisorLayout'
 import LiveDashboard from '../apps/supervisor/LiveDashboard'
 import ShiftManager from '../apps/supervisor/ShiftManager'
 
+// Kitchen App
+import KitchenLayout  from '../apps/kitchen/KitchenLayout'
+import KitchenDisplay from '../apps/kitchen/KitchenDisplay'
+
 // Owner App
 import OwnerLayout from '../apps/owner/OwnerLayout'
 import VenueSetup from '../apps/owner/VenueSetup'
@@ -45,6 +49,15 @@ export default function AppRouter() {
         </RequireRole>
       }>
         <Route index element={<OrderEntry />} />
+      </Route>
+
+      {/* ─── Kitchen App ─── */}
+      <Route path="/kitchen" element={
+        <RequireRole roles={['kitchen']}>
+          <KitchenLayout />
+        </RequireRole>
+      }>
+        <Route index element={<KitchenDisplay />} />
       </Route>
 
       {/* ─── Supervisor App ─── */}

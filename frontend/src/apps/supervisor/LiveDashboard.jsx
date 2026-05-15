@@ -9,10 +9,11 @@ const fmtTime = dt => new Date(dt).toLocaleTimeString('en-US', { hour: '2-digit'
 // ── Status helpers ───────────────────────────────────────────
 
 const ORDER_BADGE = {
-  pending:   'bg-slate-600  text-slate-200',
-  confirmed: 'bg-blue-600   text-blue-100',
+  pending:   'bg-slate-600   text-slate-200',
+  confirmed: 'bg-blue-600    text-blue-100',
+  ready:     'bg-amber-500   text-amber-950 font-bold',
   paid:      'bg-emerald-600 text-emerald-100',
-  void:      'bg-red-800    text-red-200'
+  void:      'bg-red-800     text-red-200'
 }
 const TABLE_BORDER = {
   available: 'border-slate-700',
@@ -262,13 +263,15 @@ export default function LiveDashboard() {
       })
     }
 
-    socket.on('order:created',  upsertOrder)
-    socket.on('order:updated',  upsertOrder)
-    socket.on('order:voided',   upsertOrder)
-    socket.on('order:paid',     ({ orderId }) =>
+    socket.on('order:created',   upsertOrder)
+    socket.on('order:updated',   upsertOrder)
+    socket.on('order:confirmed', upsertOrder)
+    socket.on('order:ready',     upsertOrder)
+    socket.on('order:voided',    upsertOrder)
+    socket.on('order:paid',      ({ orderId }) =>
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, statusCode: 'paid' } : o))
     )
-    socket.on('table:updated',  ({ id, statusCode }) =>
+    socket.on('table:updated',   ({ id, statusCode }) =>
       setTables(prev => prev.map(t => t.id === id ? { ...t, statusCode } : t))
     )
     socket.on('shift:opened', s  => { setShift(s); setOrders([]) })
@@ -277,6 +280,8 @@ export default function LiveDashboard() {
     return () => {
       socket.off('order:created')
       socket.off('order:updated')
+      socket.off('order:confirmed')
+      socket.off('order:ready')
       socket.off('order:voided')
       socket.off('order:paid')
       socket.off('table:updated')
@@ -291,7 +296,7 @@ export default function LiveDashboard() {
   const tableOrderMap = useMemo(() => {
     const map = {}
     orders.forEach(o => {
-      if (['pending', 'confirmed'].includes(o.statusCode)) map[o.tableId] = o
+      if (['pending', 'confirmed', 'ready'].includes(o.statusCode)) map[o.tableId] = o
     })
     return map
   }, [orders])
@@ -311,7 +316,7 @@ export default function LiveDashboard() {
     const paid = orders.filter(o => o.statusCode === 'paid')
     return {
       total:   orders.length,
-      pending: orders.filter(o => ['pending', 'confirmed'].includes(o.statusCode)).length,
+      pending: orders.filter(o => ['pending', 'confirmed', 'ready'].includes(o.statusCode)).length,
       revenue: paid.reduce((s, o) => s + parseFloat(o.totalAmount), 0)
     }
   }, [orders])

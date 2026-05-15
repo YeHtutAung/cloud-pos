@@ -78,4 +78,18 @@ async function initiatePayment(req, res, next) {
   } catch (err) { next(err) }
 }
 
-module.exports = { list, getById, create, addItems, removeItem, voidOrder, initiatePayment }
+async function confirmOrder(req, res, next) {
+  try {
+    const data = await orderService.confirmOrder(req.params.id, req.user.venueId, req.user.userId)
+    res.json({ data })
+  } catch (err) { next(err) }
+}
+
+async function markReady(req, res, next) {
+  try {
+    const data = await orderService.markReady(req.params.id, req.user.venueId, req.user.userId)
+    res.json({ data })
+  } catch (err) { next(err) }
+}
+
+module.exports = { list, getById, create, addItems, removeItem, voidOrder, initiatePayment, confirmOrder, markReady }
