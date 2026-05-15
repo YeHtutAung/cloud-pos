@@ -12,7 +12,8 @@ async function request(method, path, body) {
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {})
   })
-  const data = await res.json()
+  const text = await res.text()
+  const data = text ? JSON.parse(text) : {}
   if (!res.ok) throw new Error(data.error || 'Request failed')
   return data
 }
