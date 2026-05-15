@@ -15,7 +15,7 @@ router.get('/',
   [
     query('shiftId').optional().isUUID(),
     query('tableId').optional().isUUID(),
-    query('statusCode').optional().isIn(['pending', 'confirmed', 'paid', 'void'])
+    query('statusCode').optional().isIn(['pending', 'confirmed', 'ready', 'paid', 'void'])
   ],
   validate,
   ctrl.list

@@ -7,7 +7,7 @@ const ctrl = require('../controllers/authController')
 // Tighter rate limit for login endpoint to slow PIN brute-force
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 20,
+  max: process.env.NODE_ENV === 'production' ? 20 : 500,
   message: { error: 'Too many login attempts, please wait.' }
 })
 

@@ -58,7 +58,15 @@ async function handleCallback({
   const isSuccess = String(status) === '200'
 
   if (isSuccess) {
-    const paidAt = transactionDateTime ? new Date(transactionDateTime) : new Date()
+    // ABank sends transactionDateTime as YYYYMMDDHHmmss — parse it manually
+    let paidAt = new Date()
+    if (transactionDateTime && /^\d{14}$/.test(transactionDateTime)) {
+      const s = transactionDateTime
+      paidAt = new Date(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}T${s.slice(8,10)}:${s.slice(10,12)}:${s.slice(12,14)}Z`)
+    } else if (transactionDateTime) {
+      const parsed = new Date(transactionDateTime)
+      if (!isNaN(parsed)) paidAt = parsed
+    }
     const [paidPayment, paidOrder, tableAvail] = await Promise.all([
       resolveStatus('payment', 'paid'),
       resolveStatus('order',   'paid'),
